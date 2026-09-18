@@ -12,7 +12,7 @@ import {
 import type { Anime, AnimeStatus } from '../types';
 import { STATUS_CONFIG } from '../types';
 import { isAiringToday, isAnimeActiveAndAiringToday } from '../lib/dateUtils';
-import { getAnimeDisplaySubtitle } from '../services/continuousSagaService';
+import { getAnimeDisplaySubtitle, onSagasUpdated } from '../services/continuousSagaService';
 
 interface AnimeCardProps {
   anime: Anime;
@@ -58,7 +58,15 @@ export const AnimeCard: React.FC<AnimeCardProps> = ({
   const airingToday = isAnimeActiveAndAiringToday(anime);
   const progressPct = maxEp && maxEp > 0 ? Math.min(100, Math.round((anime.currentEpisode / maxEp) * 100)) : null;
 
-  const subtitleInfo = getAnimeDisplaySubtitle(anime);
+  const [subtitleInfo, setSubtitleInfo] = useState(() => getAnimeDisplaySubtitle(anime));
+
+  useEffect(() => {
+    setSubtitleInfo(getAnimeDisplaySubtitle(anime));
+    const unsubscribe = onSagasUpdated(() => {
+      setSubtitleInfo(getAnimeDisplaySubtitle(anime));
+    });
+    return unsubscribe;
+  }, [anime.title, anime.currentEpisode, anime.currentSeasonName, anime.season]);
 
   // Count uncompleted or future seasons
   const pendingSeasonsCount = anime.seasons && anime.seasons.length > 1

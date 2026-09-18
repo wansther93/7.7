@@ -27,7 +27,8 @@ import {
   Building2,
   CalendarDays,
   FileText,
-  Info
+  Info,
+  RefreshCw
 } from 'lucide-react';
 import type { Anime, AnimeFormData, AnimeSeasonOrArc, AnimeStatus } from '../types';
 import { STATUS_CONFIG, BROADCAST_DAYS, ALL_ANIME_GENRES } from '../types';
@@ -96,6 +97,8 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
   const [isSearchingApi, setIsSearchingApi] = useState(false);
   const [isTranslatingSynopsis, setIsTranslatingSynopsis] = useState(false);
   const [coverResults, setCoverResults] = useState<KitsuCoverResult[]>([]);
+  const [coverOffset, setCoverOffset] = useState(0);
+  const [isLoadingMoreCovers, setIsLoadingMoreCovers] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
 
   const [loading, setLoading] = useState(false);
@@ -186,6 +189,8 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
       setShowCoverControls(false);
     }
     setCoverResults([]);
+    setCoverOffset(0);
+    setIsLoadingMoreCovers(false);
     setShowSearchResults(false);
     setError(null);
   }, [initialData, isOpen]);
@@ -216,22 +221,30 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
     }
   };
 
-  // Search cover artwork with Kitsu API (100% cosmetic and decoupled from franchise structure)
+  // Search cover artwork with Kitsu API and automatically fill anime metadata from APIs
   const handleSearchApi = async () => {
     if (!title.trim() || title.trim().length < 2) {
-      setError('Digite pelo menos 2 letras do nome para buscar a capa.');
+      setError('Digite pelo menos 2 letras do nome para buscar a capa e metadados.');
       return;
     }
     setIsSearchingApi(true);
     setError(null);
+    setCoverOffset(0);
+
     try {
-      const results = await searchKitsuCovers(title.trim(), 12);
-      setCoverResults(results);
-      setShowSearchResults(true);
-      if (results.length === 0) {
+      // 1. Busca capas no Kitsu e metadados completos em APIs (AniList/Jikan/Shikimori) em paralelo
+      const [kitsuCovers, metadataResults] = await Promise.all([
+        searchKitsuCovers(title.trim(), 12, 0),
+        searchAnimeMetadata(title.trim()),
+      ]);
+
+      // Popula galeria de capas do Kitsu
+      if (kitsuCovers && kitsuCovers.length > 0) {
+        setCoverResults(kitsuCovers);
+        setShowSearchResults(true);
+      } else {
         // Fallback para Jikan apenas para extrair capas visuais se o Kitsu não retornar nada
-        const jikanResults = await searchAnimeMetadata(title.trim());
-        const fallbackCovers: KitsuCoverResult[] = jikanResults
+        const fallbackCovers: KitsuCoverResult[] = metadataResults
           .filter((j) => !!j.imageUrl)
           .map((j) => ({
             id: `jikan_${j.mal_id}`,
@@ -242,15 +255,92 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
             imageUrl: j.imageUrl,
           }));
         setCoverResults(fallbackCovers);
-        if (fallbackCovers.length === 0) {
+        if (fallbackCovers.length > 0) {
+          setShowSearchResults(true);
+        } else {
           setError('Nenhuma capa encontrada para este nome. Você pode fazer upload da foto ou colar a URL.');
+        }
+      }
+
+      // 2. Preenchimento automático dos metadados da obra via API (Gêneros, Sinopse, Estúdio, Ano, etc.)
+      const meta = metadataResults && metadataResults[0];
+      if (meta) {
+        if (meta.genres && meta.genres.length > 0 && genres.length === 0) {
+          setGenres(meta.genres);
+        }
+        if (meta.studio && !studio) {
+          setStudio(meta.studio);
+        }
+        if (meta.year && !releaseYear) {
+          setReleaseYear(String(meta.year));
+        }
+        if (meta.format && !format) {
+          setFormat(meta.format);
+        }
+        if (meta.source && !source) {
+          setSource(meta.source);
+        }
+        if (meta.broadcastDay && !broadcastDay) {
+          setBroadcastDay(meta.broadcastDay);
+        }
+        if (meta.episodes && !totalEpisodes) {
+          setTotalEpisodes(String(meta.episodes));
+        }
+        if (meta.mal_id && !malId) {
+          setMalId(meta.mal_id);
+        }
+        if (meta.title_japanese && !japaneseTitle) {
+          setJapaneseTitle(meta.title_japanese);
+        }
+        if (meta.trailerUrl && !trailerUrl) {
+          setTrailerUrl(meta.trailerUrl);
+        }
+        if (meta.synopsis && !synopsis) {
+          setSynopsis(meta.synopsis);
+          // Traduz a sinopse automaticamente em segundo plano para PT
+          translateSynopsisToPT(meta.synopsis)
+            .then((translated) => {
+              if (translated) setSynopsis(translated);
+            })
+            .catch(console.warn);
+        }
+      }
+
+      // Pré-seleciona a primeira capa apenas se nenhuma capa foi definida ainda
+      if (!coverUrl) {
+        const firstCover = kitsuCovers[0]?.imageUrl || metadataResults[0]?.imageUrl;
+        if (firstCover) {
+          setCoverUrl(firstCover);
+          setCoverSourceMode('url');
         }
       }
     } catch (err) {
       console.error(err);
-      setError('Erro na busca de capa. Você pode fazer upload da foto ou colar a URL.');
+      setError('Erro na busca de capa e metadados. Você pode fazer upload da foto ou colar a URL.');
     } finally {
       setIsSearchingApi(false);
+    }
+  };
+
+  // Carrega mais capas do Kitsu de forma paginada (offset)
+  const handleLoadMoreCovers = async () => {
+    if (!title.trim() || isLoadingMoreCovers) return;
+    setIsLoadingMoreCovers(true);
+    try {
+      const nextOffset = coverOffset + 12;
+      const moreCovers = await searchKitsuCovers(title.trim(), 12, nextOffset);
+      if (moreCovers && moreCovers.length > 0) {
+        setCoverOffset(nextOffset);
+        setCoverResults((prev) => {
+          const seen = new Set(prev.map((c) => c.imageUrl));
+          const additions = moreCovers.filter((c) => !seen.has(c.imageUrl));
+          return [...prev, ...additions];
+        });
+      }
+    } catch (err) {
+      console.warn('Erro ao carregar mais capas do Kitsu:', err);
+    } finally {
+      setIsLoadingMoreCovers(false);
     }
   };
 
@@ -673,6 +763,27 @@ export const AnimeModal: React.FC<AnimeModalProps> = ({
                       </div>
                     );
                   })}
+                </div>
+
+                {/* Botão Sutil de Paginação / Carregar Mais Capas */}
+                <div className="pt-2.5 pb-1 border-t border-white/[0.08] flex items-center justify-between">
+                  <span className="text-[10px] text-zinc-400 font-medium">
+                    {coverResults.length} capas carregadas
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleLoadMoreCovers}
+                    disabled={isLoadingMoreCovers}
+                    title="Buscar mais capas alternativas no Kitsu"
+                    className="px-3 py-1.5 rounded-xl bg-white/[0.05] hover:bg-white/[0.1] border border-white/[0.08] hover:border-white/[0.2] text-zinc-300 hover:text-white text-[11px] font-semibold transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50 active:scale-95"
+                  >
+                    {isLoadingMoreCovers ? (
+                      <Loader2 className="w-3 h-3 animate-spin text-indigo-400" />
+                    ) : (
+                      <RefreshCw className="w-3 h-3 text-amber-400" />
+                    )}
+                    <span>{isLoadingMoreCovers ? 'Buscando...' : 'Mais opções de capa'}</span>
+                  </button>
                 </div>
               </div>
             )}

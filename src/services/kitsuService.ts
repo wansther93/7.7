@@ -33,11 +33,11 @@ const episodeMemoryCache = new Map<string, KitsuEpisodeData[]>();
  * Busca capas alternativas e de alta resolução no Kitsu pelo nome do anime.
  * Traz resultados de forma rápida e fluida (limite padrão: 8 a 10 capas).
  */
-export async function searchKitsuCovers(query: string, limit = 8): Promise<KitsuCoverResult[]> {
+export async function searchKitsuCovers(query: string, limit = 8, offset = 0): Promise<KitsuCoverResult[]> {
   const cleanQuery = query.trim();
   if (!cleanQuery) return [];
 
-  const cacheKey = `kitsu_covers_${cleanQuery.toLowerCase()}_${limit}`;
+  const cacheKey = `kitsu_covers_${cleanQuery.toLowerCase()}_${limit}_${offset}`;
   if (coversMemoryCache.has(cacheKey)) {
     return coversMemoryCache.get(cacheKey)!;
   }
@@ -60,7 +60,7 @@ export async function searchKitsuCovers(query: string, limit = 8): Promise<Kitsu
   const timeoutId = setTimeout(() => controller.abort(), 4500); // 4.5s timeout
 
   try {
-    const url = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(cleanQuery)}&page[limit]=${limit}`;
+    const url = `https://kitsu.io/api/edge/anime?filter[text]=${encodeURIComponent(cleanQuery)}&page[limit]=${limit}&page[offset]=${offset}`;
     const response = await fetch(url, {
       signal: controller.signal,
       headers: {
