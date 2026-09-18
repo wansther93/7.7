@@ -27,6 +27,13 @@ import {
   getPersistedAnimeRichData,
   getOrFetchAnimeRichData,
 } from '../../services/animeMetadataService';
+import {
+  getAnimeDisplaySubtitle,
+  getSagasForAnime,
+  fetchSagasFromApi,
+  isContinuousAnime,
+  type SagaInterval,
+} from '../../services/continuousSagaService';
 
 interface CollectionAnimeModalProps {
   anime: Anime;
@@ -56,6 +63,8 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
 
   const [bannerUrl, setBannerUrl] = useState<string | null>(anime.bannerUrl || null);
   const [trailerUrl, setTrailerUrl] = useState<string | null>(anime.trailerUrl || null);
+  const [broadcastDay, setBroadcastDay] = useState<string | null>(anime.broadcastDay || null);
+  const [sagasList, setSagasList] = useState<SagaInterval[] | null>(null);
 
   const [isSynopsisExpanded, setIsSynopsisExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -69,6 +78,22 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
     let isMounted = true;
     setBannerUrl(anime.bannerUrl || null);
     setTrailerUrl(anime.trailerUrl || null);
+    setBroadcastDay(anime.broadcastDay || null);
+
+    // Carrega sagas e arcos da API se for anime contínuo (One Piece, Bleach, Naruto, DBZ, etc.)
+    const isContinuous = isContinuousAnime(anime);
+    if (isContinuous) {
+      const cachedSagas = getSagasForAnime(anime.title);
+      if (cachedSagas && cachedSagas.length > 0) {
+        setSagasList(cachedSagas);
+      } else {
+        fetchSagasFromApi(anime.title).then((loaded) => {
+          if (isMounted && loaded && loaded.length > 0) {
+            setSagasList(loaded);
+          }
+        });
+      }
+    }
 
     // 1. Tenta carregar os dados persistidos imediatamente
     const persisted = getPersistedAnimeRichData(anime);
@@ -78,30 +103,38 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
       setThemes(persisted.themes || []);
       if (persisted.bannerUrl && !anime.bannerUrl) setBannerUrl(persisted.bannerUrl);
       if (persisted.trailerUrl && !anime.trailerUrl) setTrailerUrl(persisted.trailerUrl);
+      if (persisted.broadcastDay && !anime.broadcastDay) setBroadcastDay(persisted.broadcastDay);
       setLoadingStreaming(false);
       setLoadingCharacters(false);
       setLoadingThemes(false);
 
-      // Se o anime ainda não possui banner oficial salvo, busca nas APIs oficiais
-      if (!anime.bannerUrl && !persisted.bannerUrl) {
-        getAnimeBanner(anime.mal_id || 0, anime.title).then((found) => {
-          if (isMounted && found) {
-            setBannerUrl(found);
-            if (isOwner && anime.id) {
-              updateAnime(anime.id, { bannerUrl: found }).catch(() => {});
+      const hasMissingInfo =
+        (!persisted.trailerUrl && !anime.trailerUrl) ||
+        (!persisted.streamingLinks || persisted.streamingLinks.length === 0) ||
+        (!persisted.broadcastDay && !anime.broadcastDay);
+
+      if (!hasMissingInfo) {
+        // Se já possui todos os dados vitais salvos, apenas valida o banner
+        if (!anime.bannerUrl && !persisted.bannerUrl) {
+          getAnimeBanner(anime.mal_id || 0, anime.title).then((found) => {
+            if (isMounted && found) {
+              setBannerUrl(found);
+              if (isOwner && anime.id) {
+                updateAnime(anime.id, { bannerUrl: found }).catch(() => {});
+              }
             }
-          }
-        });
+          });
+        }
+        return;
       }
-      return;
     }
 
-    // 2. Se for a 1ª vez ou anime recém-adicionado/antigo, busca nas APIs e salva
+    // 2. Se for a 1ª vez ou anime recém-adicionado/antigo com dados incompletos, busca nas APIs e salva
     setLoadingStreaming(true);
     setLoadingCharacters(true);
     setLoadingThemes(true);
 
-    getOrFetchAnimeRichData(anime)
+    getOrFetchAnimeRichData(anime, true)
       .then((data) => {
         if (isMounted) {
           setStreamingLinks(data.streamingLinks || []);
@@ -109,6 +142,7 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
           setThemes(data.themes || []);
           if (data.bannerUrl) setBannerUrl(data.bannerUrl);
           if (data.trailerUrl) setTrailerUrl(data.trailerUrl);
+          if (data.broadcastDay) setBroadcastDay(data.broadcastDay);
           setLoadingStreaming(false);
           setLoadingCharacters(false);
           setLoadingThemes(false);
@@ -220,6 +254,9 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
     color: 'bg-zinc-700 text-zinc-300',
   };
 
+  const isContinuous = isContinuousAnime(anime);
+  const displaySubtitle = getAnimeDisplaySubtitle(anime);
+
   return (
     <div
       id="collection-anime-modal-backdrop"
@@ -302,6 +339,12 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
                     {anime.year}
                   </span>
                 )}
+                {(broadcastDay || anime.broadcastDay) && (
+                  <span className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                    <Calendar className="w-3 h-3 text-amber-400" />
+                    <span>Exibição: {broadcastDay || anime.broadcastDay}</span>
+                  </span>
+                )}
               </div>
 
               <h2 className="text-base sm:text-xl md:text-2xl font-black text-white leading-tight line-clamp-2 drop-shadow-md">
@@ -340,7 +383,9 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
             <div className="space-y-1.5">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-zinc-300 font-medium">
-                  {anime.currentSeasonName ? (
+                  {displaySubtitle.label ? (
+                    <span className="text-amber-300 font-semibold">{displaySubtitle.label} • </span>
+                  ) : anime.currentSeasonName ? (
                     <span className="text-amber-300 font-semibold">{anime.currentSeasonName} • </span>
                   ) : anime.season ? (
                     <span className="text-amber-300 font-semibold">Temporada {anime.season} • </span>
@@ -360,6 +405,55 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Sagas e Arcos Catalogados das APIs (One Piece, Bleach, Naruto, DBZ, etc.) */}
+            {isContinuous && (
+              <div className="pt-2 border-t border-white/5 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-amber-400/90 flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-amber-400" />
+                    Sagas e Arcos Oficiais (TMDB)
+                  </span>
+                  {sagasList && sagasList.length > 0 && (
+                    <span className="text-[10px] text-zinc-400 font-medium">
+                      {sagasList.length} sagas catalogadas
+                    </span>
+                  )}
+                </div>
+
+                {sagasList && sagasList.length > 0 ? (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-48 overflow-y-auto pr-1">
+                    {sagasList.map((saga) => {
+                      const isCurrent =
+                        currentEp >= saga.startEp && (saga.endEp === null || currentEp <= saga.endEp);
+                      return (
+                        <div
+                          key={saga.id}
+                          className={`p-2 rounded-lg border text-xs flex items-center justify-between transition-all ${
+                            isCurrent
+                              ? 'bg-amber-500/15 border-amber-500/40 text-amber-200 font-semibold shadow-sm'
+                              : 'bg-black/30 border-white/5 text-zinc-400 hover:text-zinc-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {isCurrent && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0 animate-pulse" />}
+                            <span className="truncate">{saga.name}</span>
+                          </div>
+                          <span className="text-[10px] text-zinc-500 font-mono ml-2 flex-shrink-0">
+                            Ep. {saga.startEp}–{saga.endEp ? saga.endEp : 'atual'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-[11px] text-zinc-500 italic py-1 flex items-center gap-2">
+                    <div className="w-2.5 h-2.5 border border-amber-400 border-t-transparent rounded-full animate-spin" />
+                    Carregando lista de sagas e arcos das APIs oficiais...
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Avaliação Pessoal e Nota */}
             <div className="flex flex-wrap items-center gap-3 pt-1 text-xs">
@@ -398,6 +492,13 @@ export const CollectionAnimeModal: React.FC<CollectionAnimeModalProps> = ({
               </h3>
               <span className="text-[10px] text-zinc-500 font-medium">Fontes Oficiais das APIs</span>
             </div>
+
+            {(broadcastDay || anime.broadcastDay) && (
+              <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs text-amber-300 font-medium">
+                <Calendar className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                <span>Transmissão simultânea regular: toda(o) <strong>{broadcastDay || anime.broadcastDay}</strong> nas plataformas oficiais</span>
+              </div>
+            )}
 
             {loadingStreaming ? (
               <div className="flex items-center gap-2 py-2.5 text-xs text-zinc-400 animate-pulse">

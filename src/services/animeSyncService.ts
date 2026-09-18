@@ -2,6 +2,7 @@ import type { Anime } from '../types';
 import { updateAnime } from './animeService';
 import { syncFranchiseSeasonsForAnime } from './franchiseService';
 import { resolveAnimeAggregatedStatus, type AnimeAggregatedStatus } from './aggregatorStatusService';
+import { resolveOfficialTrailer } from './jikanService';
 
 export interface AnimeSyncUpdateResult {
   animeId: string;
@@ -118,6 +119,9 @@ export const fetchFreshAnimeDetails = async (
         if (media.trailer?.site === 'youtube' && media.trailer?.id) {
           trailerUrl = `https://www.youtube.com/watch?v=${media.trailer.id}`;
         }
+        if (!trailerUrl && (media.idMal || media.id)) {
+          trailerUrl = await resolveOfficialTrailer(media.idMal || media.id, title);
+        }
 
         // Determina o status agregador da obra através de suas relações e sequências
         const aggregated = resolveAnimeAggregatedStatus({
@@ -183,6 +187,17 @@ export const fetchFreshAnimeDetails = async (
           seasonYear: item.year || null,
         });
 
+        let jikanTrailerUrl: string | null =
+          item.trailer?.url ||
+          (item.trailer?.youtube_id ? `https://www.youtube.com/watch?v=${item.trailer.youtube_id}` : null);
+        if (!jikanTrailerUrl && item.trailer?.embed_url) {
+          const m = item.trailer.embed_url.match(/embed\/([a-zA-Z0-9_-]+)/);
+          if (m) jikanTrailerUrl = `https://www.youtube.com/watch?v=${m[1]}`;
+        }
+        if (!jikanTrailerUrl && item.mal_id) {
+          jikanTrailerUrl = await resolveOfficialTrailer(item.mal_id, title);
+        }
+
         return {
           mal_id: item.mal_id,
           totalEpisodes: item.episodes || null,
@@ -194,7 +209,7 @@ export const fetchFreshAnimeDetails = async (
           broadcastDay: aggregated.broadcastDay || null,
           broadcastTime: aggregated.broadcastTime || null,
           synopsis: item.synopsis || null,
-          trailerUrl: item.trailer?.url || null,
+          trailerUrl: jikanTrailerUrl,
           nextEpisode: null,
           aggregatedStatus: aggregated,
         };

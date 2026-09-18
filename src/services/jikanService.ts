@@ -5,7 +5,7 @@
  * 3. Kitsu API (Fallback)
  */
 import { translateGenres } from './translationService';
-import { searchShikimori } from './shikimoriService';
+import { searchShikimori, fetchShikimoriVideos } from './shikimoriService';
 
 export interface JikanAnimeResult {
   mal_id: number;
@@ -24,6 +24,49 @@ export interface JikanAnimeResult {
   source?: string | null;
   year?: number;
   trailerUrl?: string | null;
+}
+
+/**
+ * Resolve o trailer oficial do anime consultando de forma resiliente Jikan e Shikimori Videos
+ */
+export async function resolveOfficialTrailer(malId?: number | null, title?: string): Promise<string | null> {
+  if (malId && malId > 0) {
+    // 1. Tenta Jikan v4
+    try {
+      const res = await fetch(`https://api.jikan.moe/v4/anime/${malId}`);
+      if (res.ok) {
+        const json = await res.json();
+        const tr = json.data?.trailer;
+        if (tr?.url) return tr.url;
+        if (tr?.youtube_id) return `https://www.youtube.com/watch?v=${tr.youtube_id}`;
+        if (tr?.embed_url) {
+          const match = tr.embed_url.match(/embed\/([a-zA-Z0-9_-]+)/);
+          if (match) return `https://www.youtube.com/watch?v=${match[1]}`;
+        }
+      }
+    } catch {
+      // Ignora erro de rede/quota no Jikan
+    }
+
+    // 2. Tenta Shikimori Videos (Espelho de trailers do MyAnimeList sem bloqueio)
+    try {
+      const vids = await fetchShikimoriVideos(malId);
+      if (Array.isArray(vids) && vids.length > 0) {
+        const pv = vids.find(
+          (v) => (v.kind === 'pv' || v.kind === 'clip' || v.hosting === 'youtube') && (v.url || v.player_url)
+        );
+        if (pv?.player_url) {
+          const m = pv.player_url.match(/embed\/([a-zA-Z0-9_-]+)/);
+          if (m) return `https://www.youtube.com/watch?v=${m[1]}`;
+        }
+        if (pv?.url) return pv.url;
+      }
+    } catch {
+      // Ignora erro
+    }
+  }
+
+  return null;
 }
 
 // Dias da semana mapeados (broadcast.day / nextAiringEpisode)
@@ -339,7 +382,15 @@ async function searchJikan(query: string): Promise<JikanAnimeResult[]> {
     const format = item.type ? FORMAT_MAP_PT[item.type.toUpperCase()] || item.type : null;
     const source = item.source ? SOURCE_MAP_PT[item.source.toUpperCase()] || item.source : null;
     const year = item.year || item.aired?.prop?.from?.year || undefined;
-    const trailerUrl = item.trailer?.url || (item.trailer?.youtube_id ? `https://www.youtube.com/watch?v=${item.trailer.youtube_id}` : null);
+    let trailerUrl: string | null =
+      item.trailer?.url ||
+      (item.trailer?.youtube_id ? `https://www.youtube.com/watch?v=${item.trailer.youtube_id}` : null);
+    if (!trailerUrl && item.trailer?.embed_url) {
+      const match = item.trailer.embed_url.match(/embed\/([a-zA-Z0-9_-]+)/);
+      if (match) {
+        trailerUrl = `https://www.youtube.com/watch?v=${match[1]}`;
+      }
+    }
 
     return {
       mal_id: item.mal_id,

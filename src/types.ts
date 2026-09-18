@@ -9,6 +9,13 @@ export type AnimeStatus =
 
 export type ArcWatchStatus = 'completed' | 'in_progress' | 'not_started';
 
+export interface SagaInterval {
+  id: string;
+  name: string;
+  startEp: number;
+  endEp: number | null; // null se estiver em andamento (ongoing)
+}
+
 export interface AnimeSeasonOrArc {
   id: string;
   name: string; // Ex: "Temporada 1", "Arco de Alabasta", "Temporada 3" (Nome de exibição customizável pelo usuário)

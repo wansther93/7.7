@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { 
   Tv, 
   ShieldCheck, 
-  Zap, 
+  Database, 
   AlertCircle, 
   Layers, 
   Image as ImageIcon,
@@ -196,12 +196,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onEnterGuest }) => {
 
             <div className="flex items-start gap-3">
               <div className="p-2 rounded-xl bg-amber-500/10 text-amber-400 shrink-0 mt-0.5 border border-amber-500/20">
-                <Zap className="w-4 h-4" />
+                <Database className="w-4 h-4" />
               </div>
               <div>
-                <h2 className="text-xs sm:text-sm font-bold text-slate-200">Gratuito para Sempre (R$ 0,00)</h2>
+                <h2 className="text-xs sm:text-sm font-bold text-slate-200">Metadados & APIs Oficiais</h2>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  Sem taxas, sem planos pagos, sem limites escondidos.
+                  Integrado com <strong>The Movie Database (TMDB)</strong>, <strong>AniList</strong> e <strong>MyAnimeList</strong> para títulos, sagas e episódios em tempo real.
                 </p>
               </div>
             </div>
@@ -272,9 +272,12 @@ export const LoginScreen: React.FC<LoginScreenProps> = ({ onEnterGuest }) => {
         </div>
       </div>
 
-      {/* Footer */}
-      <footer className="mt-8 text-center text-xs text-slate-500 relative z-10">
-        WAnime List • Seu anime tracker na nuvem com custo zero.
+      {/* Footer com conformidade legal das APIs */}
+      <footer className="mt-8 text-center text-[11px] text-slate-500 relative z-10 max-w-lg leading-relaxed space-y-1 px-4">
+        <p>WAnime List • Gerenciador pessoal de animes, sagas e episódios.</p>
+        <p className="text-[10px] text-slate-600">
+          Metadados, sinopses e dados de sagas fornecidos por The Movie Database (TMDB), AniList e MyAnimeList. Este produto usa a API do TMDB, mas não é endossado ou certificado pelo TMDB.
+        </p>
       </footer>
     </div>
   );

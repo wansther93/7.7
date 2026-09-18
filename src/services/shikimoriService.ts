@@ -370,3 +370,31 @@ export async function fetchShikimoriExternalLinks(id: number): Promise<Array<{ s
     return [];
   }
 }
+
+/**
+ * 8. Vídeos e Trailers Oficiais no Shikimori (/api/animes/:id/videos)
+ */
+export async function fetchShikimoriVideos(id: number): Promise<Array<{ url?: string; player_url?: string; kind?: string; hosting?: string }>> {
+  if (!id) return [];
+  const url = `${SHIKIMORI_BASE}/animes/${id}/videos`;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+  try {
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: DEFAULT_HEADERS,
+    });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) return [];
+
+    const data = await res.json();
+    if (!Array.isArray(data)) return [];
+
+    return data;
+  } catch {
+    return [];
+  }
+}
+
