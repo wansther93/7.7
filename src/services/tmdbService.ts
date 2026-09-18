@@ -129,37 +129,27 @@ export async function fetchSagasFromTmdb(animeTitle: string): Promise<SagaInterv
       const groupsJson = await groupsRes.json();
       const results: any[] = groupsJson.results || [];
 
-      // Seleciona o grupo mais adequado e completo de arcos:
-      // - Para One Piece: 'Story Arc' (55 arcos detalhados: Punk Hazard, Dressrosa, Whole Cake, Wano, Egghead, Elbaf)
-      // - Para Shippuden: 'Official Story Arcs' (29 arcos cobrindo todos os 500 episódios)
-      // - Para Naruto: 'Official Story Arcs'
-      // - Para Bleach: 'Story Arc' ou 'Arcs'
-      // - Para Dragon Ball Z: 'Arcs'
-      // - Para Hunter x Hunter: 'Story Arcs'
+      // Seleciona o grupo mais adequado e completo de arcos de forma 100% dinâmica para qualquer anime:
+      // Prioriza grupos oficiais de arcos da história (Story Arc, Official Story Arcs, Arcs, Sagas)
       let selectedGroup: any = null;
 
-      if (norm.includes('one piece')) {
-        selectedGroup = results.find((g) => (g.name || '').trim().toLowerCase() === 'story arc') ||
-                        results.find((g) => (g.name || '').trim().toLowerCase() === 'sagas');
-      } else if (norm.includes('shippuden')) {
-        selectedGroup = results.find((g) => (g.name || '').trim().toLowerCase() === 'official story arcs') ||
-                        results.find((g) => (g.name || '').trim().toLowerCase() === 'story arcs');
-      }
+      selectedGroup =
+        results.find((g) => {
+          const gn = (g.name || '').trim().toLowerCase();
+          return gn === 'story arc' || gn === 'official story arcs' || gn === 'story arcs';
+        }) ||
+        results.find((g) => {
+          const gn = (g.name || '').trim().toLowerCase();
+          return gn === 'arcs' || gn === 'sagas' || gn === 'canon arcs';
+        }) ||
+        results.find((g) => {
+          const gn = (g.name || '').toLowerCase();
+          return gn.includes('arc') || gn.includes('saga');
+        });
 
-      if (!selectedGroup) {
-        selectedGroup =
-          results.find((g) => {
-            const gn = (g.name || '').trim().toLowerCase();
-            return gn === 'official story arcs' || gn === 'story arc' || gn === 'story arcs';
-          }) ||
-          results.find((g) => {
-            const gn = (g.name || '').trim().toLowerCase();
-            return gn === 'arcs' || gn === 'sagas';
-          }) ||
-          results.find((g) => {
-            const gn = (g.name || '').toLowerCase();
-            return gn.includes('arc') || gn.includes('saga');
-          });
+      // Se não encontrou pelo nome, seleciona o grupo com maior contagem de grupos/episódios
+      if (!selectedGroup && results.length > 0) {
+        selectedGroup = [...results].sort((a, b) => (b.group_count || 0) - (a.group_count || 0))[0];
       }
 
       if (selectedGroup && selectedGroup.id) {

@@ -60,6 +60,14 @@ import {
 } from '../services/jikanService';
 import { updateAnime } from '../services/animeService';
 import { fetchAnimeFranchiseTree } from '../services/franchiseService';
+import {
+  getAnimeDisplaySubtitle,
+  onSagasUpdated,
+  getSagasForAnime,
+  fetchSagasFromApi,
+  isContinuousAnime,
+  type SagaInterval,
+} from '../services/continuousSagaService';
 
 interface AnimeDetailModalProps {
   anime: Anime | null;
@@ -125,6 +133,12 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
   const [isRefreshingTree, setIsRefreshingTree] = useState(false);
   const [refreshTreeFeedback, setRefreshTreeFeedback] = useState<{ text: string; success: boolean } | null>(null);
 
+  // Subtítulo e sagas dinâmicas das APIs (TMDB/Wikipedia)
+  const [subtitleInfo, setSubtitleInfo] = useState(() =>
+    anime ? getAnimeDisplaySubtitle(anime) : { label: 'Temporada 1', isSaga: false }
+  );
+  const [sagasList, setSagasList] = useState<SagaInterval[] | null>(null);
+
   useEffect(() => {
     if (anime) {
       setNotesDraft(anime.notes || '');
@@ -141,8 +155,36 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
       setIsSynopsisExpanded(false);
       setIsManagingSeasons(false);
       setRefreshTreeFeedback(null);
+
+      // Atualiza o subtítulo e busca arcos oficiais da API apenas se for anime contínuo
+      setSubtitleInfo(getAnimeDisplaySubtitle(anime));
+      if (isContinuousAnime(anime)) {
+        const cached = getSagasForAnime(anime.title);
+        if (cached && cached.length > 0) {
+          setSagasList(cached);
+        } else {
+          fetchSagasFromApi(anime.title).then((loaded) => {
+            if (loaded && loaded.length > 0) setSagasList(loaded);
+          }).catch(console.warn);
+        }
+      } else {
+        setSagasList(null);
+      }
     }
-  }, [anime?.id, anime?.notes, anime?.currentEpisode, anime?.bannerUrl]);
+  }, [anime?.id, anime?.notes, anime?.currentEpisode, anime?.bannerUrl, anime?.title, anime?.currentSeasonName, anime?.season]);
+
+  // Listener para atualização instantânea em tempo real dos arcos vindos da API
+  useEffect(() => {
+    if (!anime) return;
+    const unsubscribe = onSagasUpdated(() => {
+      setSubtitleInfo(getAnimeDisplaySubtitle(anime));
+      if (isContinuousAnime(anime)) {
+        const fresh = getSagasForAnime(anime.title);
+        if (fresh && fresh.length > 0) setSagasList(fresh);
+      }
+    });
+    return unsubscribe;
+  }, [anime?.title, anime?.currentEpisode, anime?.currentSeasonName, anime?.season]);
 
   // Ciclo suave de rotação de banners estritamente da mesma obra (a cada 7 segundos)
   useEffect(() => {
@@ -864,9 +906,16 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                   <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
                     Progresso Atual
                   </span>
-                  <h4 className="text-xs sm:text-sm font-bold text-indigo-300 truncate max-w-xs">
-                    {anime.currentSeasonName || 'Temporada 1'}
-                  </h4>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <h4 className="text-xs sm:text-sm font-bold text-indigo-300 truncate max-w-xs">
+                      {subtitleInfo.label}
+                    </h4>
+                    {subtitleInfo.isSaga && (
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30 shrink-0">
+                        Arco Oficial (TMDB)
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 {/* Botões Rápidos de Episódio [-1] [+1] e Digitar */}
@@ -1529,6 +1578,77 @@ export const AnimeDetailModal: React.FC<AnimeDetailModalProps> = ({
                     </div>
                   )}
                 </div>
+
+                {/* BLOCO DE ARCOS & SAGAS OFICIAIS DAS APIs (TMDB) - Exclusivo para Animes Contínuos */}
+                {isContinuousAnime(anime) && sagasList && sagasList.length > 0 && (
+                  <div className="mt-5 pt-5 border-t border-white/10 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Flame className="w-4 h-4 text-amber-400" />
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-200">
+                          Sagas e Arcos Oficiais da Obra (TMDB)
+                        </h4>
+                      </div>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                        {sagasList.length} arcos catalogados
+                      </span>
+                    </div>
+
+                    <p className="text-[11px] text-slate-400">
+                      Arcos da história sincronizados dinamicamente via The Movie Database (TMDB). O arco atual é atualizado automaticamente conforme você avança ou retrocede seus episódios.
+                    </p>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-72 overflow-y-auto pr-1">
+                      {sagasList.map((saga) => {
+                        const currentEp = Number(anime.currentEpisode) || 0;
+                        const isCurrent =
+                          currentEp >= saga.startEp && (saga.endEp === null || currentEp <= saga.endEp);
+                        const isPast = saga.endEp !== null && currentEp > saga.endEp;
+
+                        return (
+                          <div
+                            key={`modal_saga_${saga.id}`}
+                            className={`p-3 rounded-xl border transition-all flex items-center justify-between gap-2 ${
+                              isCurrent
+                                ? 'bg-amber-950/30 border-amber-500/50 text-white ring-1 ring-amber-500/40 shadow-md'
+                                : isPast
+                                ? 'bg-black/50 border-white/5 text-slate-400 opacity-85'
+                                : 'bg-black border-white/10 text-slate-300'
+                            }`}
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-xs font-bold truncate text-white">{saga.name}</span>
+                                {isCurrent && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500 text-black font-black uppercase shrink-0">
+                                    Arco Atual
+                                  </span>
+                                )}
+                                {isPast && (
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                                )}
+                              </div>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                Episódios {saga.startEp} - {saga.endEp ? saga.endEp : 'em exibição'}
+                              </span>
+                            </div>
+
+                            {!isReadOnly && onUpdateEpisode && !isCurrent && (
+                              <button
+                                type="button"
+                                onClick={() => onUpdateEpisode(anime, saga.startEp)}
+                                title={`Pular para o início deste arco (Episódio ${saga.startEp})`}
+                                className="px-2 py-1 rounded-lg bg-black hover:bg-white/10 border border-white/10 text-[10px] font-bold text-slate-300 hover:text-white transition-all cursor-pointer shrink-0"
+                              >
+                                Ir p/ Ep {saga.startEp}
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()}

@@ -60,43 +60,42 @@ function normalizeTitle(title: string): string {
 }
 
 /**
- * Identifica se a obra é um anime contínuo (não sazonal)
- * Baseado na estrutura da obra ou franquias conhecidas de transmissão ininterrupta
+ * Identifica com precisão se uma obra é um anime contínuo (não sazonal).
+ * REQUISITOS ESTRITOS:
+ * - Animes sazonais comuns (ex: Attack on Titan, Jujutsu Kaisen, Kimetsu no Yaiba, Frieren, Solo Leveling, etc.)
+ *   possuem temporadas bem definidas e NUNCA devem ser tratados como contínuos.
+ * - Animes contínuos são obras de transmissão corrida/ininterrupta ou explicitamente configuradas com arcos narrativos.
  */
 export function isContinuousAnime(anime: Anime): boolean {
   if (!anime) return false;
-  const norm = normalizeTitle(anime.title);
 
-  // Se já tivermos sagas resolvidas da API para este título
-  if (dynamicSagasCache.has(norm)) {
-    const list = dynamicSagasCache.get(norm);
-    if (list && list.length > 0) return true;
-  }
-
-  // Se o título for de franquia contínua conhecida
-  if (
-    norm.includes('one piece') ||
-    norm.includes('naruto') ||
-    norm.includes('bleach') ||
-    norm.includes('dragon ball') ||
-    norm.includes('detective conan') ||
-    norm.includes('gintama') ||
-    norm.includes('hunter x hunter') ||
-    norm.includes('fairy tail') ||
-    norm.includes('black clover') ||
-    norm.includes('boruto')
-  ) {
+  // 1. Se o usuário explicitamente marcou o modo de arcos
+  if (anime.structureMode === 'arcs') {
     return true;
   }
 
-  // Se tiver apenas 1 temporada cadastrada (ou nenhuma) e alto volume de episódios
-  const hasMultipleDistinctSeasons = Boolean(anime.seasons && anime.seasons.length > 1);
-  if (!hasMultipleDistinctSeasons) {
-    const currentEp = Number(anime.currentEpisode) || 0;
-    const totalEp = Number(anime.totalEpisodes) || 0;
-    if (anime.format === 'TV' && (anime.totalEpisodes === null || totalEp >= 45 || currentEp >= 30)) {
-      return true;
-    }
+  // 2. Se as seções cadastradas contêm arcos explícitos
+  if (anime.seasons?.some((s) => s.type === 'arc' || /\barco\b|\bsaga\b/i.test(s.name))) {
+    return true;
+  }
+
+  // 3. Se tem múltiplas temporadas cadastradas (ex: Temporada 1, Temporada 2, etc.), é estritamente SAZONAL!
+  if (anime.seasons && anime.seasons.length > 1) {
+    return false;
+  }
+
+  // 4. Animes contínuos clássicos de episódio único corrido (sem quebra de temporadas de 12/24 eps)
+  const totalEp = Number(anime.totalEpisodes) || 0;
+  const currentEp = Number(anime.currentEpisode) || 0;
+
+  // Se tem número total de episódios baixo e fechado (ex: 12, 13, 24, 25, 26 eps), é sazonal padrão
+  if (anime.totalEpisodes !== null && totalEp > 0 && totalEp <= 30) {
+    return false;
+  }
+
+  // Obras contínuas possuem contagem corrida grande (> 40 eps contínuos) ou exibição sem total definido
+  if (anime.totalEpisodes === null || totalEp > 40 || currentEp > 40) {
+    return true;
   }
 
   return false;
@@ -481,27 +480,41 @@ export function getAnimeDisplaySubtitle(anime: Anime): SubtitleDisplayInfo {
     return { label: 'Temporada 1', isSaga: false };
   }
 
-  // 1. Se for anime contínuo, calcula a saga dinamicamente via API
-  if (isContinuousAnime(anime)) {
-    const currentEp = Number(anime.currentEpisode) || 1;
-    const sagaName = getSagaForEpisode(anime.title, currentEp);
-
-    if (sagaName) {
-      const lower = sagaName.toLowerCase();
-      const formattedLabel =
-        lower.startsWith('saga') || lower.startsWith('temporada') || lower.startsWith('arco')
-          ? sagaName
-          : `Saga ${sagaName}`;
-
+  // 1. Animes Sazonais: NUNCA usam arcos. Retornam SEMPRE o nome da temporada atual cadastrada.
+  if (!isContinuousAnime(anime)) {
+    if (anime.currentSeasonName && anime.currentSeasonName.trim()) {
       return {
-        label: formattedLabel,
-        isSaga: true,
-        rawName: sagaName,
+        label: anime.currentSeasonName,
+        isSaga: false,
       };
     }
+    return {
+      label: `Temporada ${anime.season || 1}`,
+      isSaga: false,
+    };
   }
 
-  // 2. Se for anime sazonal com nome customizado ou salvo
+  // 2. Animes Contínuos: obtêm o arco oficial da API (TMDB/Wikipedia) baseado no episódio atual
+  const currentEp = Number(anime.currentEpisode) || 1;
+  const sagaName = getSagaForEpisode(anime.title, currentEp);
+
+  if (sagaName) {
+    const lower = sagaName.toLowerCase();
+    const formattedLabel =
+      lower.startsWith('saga') || lower.startsWith('temporada') || lower.startsWith('arco')
+        ? sagaName
+        : `Saga ${sagaName}`;
+
+    return {
+      label: formattedLabel,
+      isSaga: true,
+      rawName: sagaName,
+    };
+  }
+
+  // Se a API ainda estiver carregando os arcos
+  fetchSagasFromApi(anime.title).catch(console.warn);
+
   if (anime.currentSeasonName && anime.currentSeasonName.trim()) {
     return {
       label: anime.currentSeasonName,
@@ -509,7 +522,6 @@ export function getAnimeDisplaySubtitle(anime: Anime): SubtitleDisplayInfo {
     };
   }
 
-  // 3. Padrão sazonal: Temporada N
   return {
     label: `Temporada ${anime.season || 1}`,
     isSaga: false,
