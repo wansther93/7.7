@@ -6,67 +6,17 @@
 import type { Anime, AnimeSeasonOrArc, FranchiseTreeItem, FranchiseCandidate } from '../types';
 import { searchAnimeMetadata } from './jikanService';
 
-// Normalizador de título de franquia (unifica nomes ocidentais, japoneses e remove sufixos de temporada)
+// Normalizador de título de franquia (remove de forma genérica sufixos de temporada, partes e pontuações)
 export function getFranchiseRootTitle(title: string): string {
   if (!title) return '';
   let cleaned = title.toLowerCase().trim();
 
-  // Mapeamento direto de nomes ocidentais e populares para raízes canônicas unificadas
-  if (/demon\s*slayer|kimetsu\s*no\s*yaiba/gi.test(cleaned)) {
-    return 'kimetsu no yaiba';
-  }
-  if (/slime|tensei\s*shitara\s*slime|reincarnated\s*as\s*a\s*slime|tensura/gi.test(cleaned)) {
-    return 'tensei shitara slime datta ken';
-  }
-  if (/attack\s*on\s*titan|shingeki\s*no\s*kyojin/gi.test(cleaned)) {
-    return 'shingeki no kyojin';
-  }
-  if (/my\s*hero\s*academia|boku\s*no\s*hero/gi.test(cleaned)) {
-    return 'boku no hero academia';
-  }
-  if (/jujutsu\s*kaisen|sorcery\s*fight/gi.test(cleaned)) {
-    return 'jujutsu kaisen';
-  }
-  if (/mushoku\s*tensei|jobless\s*reincarnation/gi.test(cleaned)) {
-    return 'mushoku tensei';
-  }
-  if (/solo\s*leveling|ore\s*dake\s*level/gi.test(cleaned)) {
-    return 'solo leveling';
-  }
-  if (/re\s*:\s*zero|rezero|starting\s*life\s*in\s*another\s*world/gi.test(cleaned)) {
-    return 're:zero';
-  }
-  if (/frieren|sousou\s*no\s*frieren/gi.test(cleaned)) {
-    return 'frieren';
-  }
-  if (/danmachi|pick\s*up\s*girls\s*in\s*a\s*dungeon|dungeon\s*ni\s*deai/gi.test(cleaned)) {
-    return 'danmachi';
-  }
-  if (/konosuba|kono\s*subarashii/gi.test(cleaned)) {
-    return 'konosuba';
-  }
-
   cleaned = cleaned
-    .replace(/mushuku tensei/gi, 'mushoku tensei')
-    .replace(/demom slayer/gi, 'demon slayer')
-    .replace(/kimetsu no yaba/gi, 'kimetsu no yaiba')
-    .replace(/shingeky/gi, 'shingeki')
-    .replace(/jujultsu/gi, 'jujutsu')
-    .replace(/rezero/gi, 're:zero')
     .replace(/:\s*season\s*\d+/gi, '')
     .replace(/\s*\d+(?:nd|rd|th|st)?\s*season/gi, '')
     .replace(/:\s*\d+(?:nd|rd|th|st)?\s*season/gi, '')
     .replace(/\s*season\s*\d+/gi, '')
     .replace(/\s*temporada\s*\d+/gi, '')
-    .replace(/:\s*yuukaku-hen|:\s*entertainment district arc/gi, '')
-    .replace(/:\s*katanakaji no sato-hen|:\s*swordsmith village arc/gi, '')
-    .replace(/:\s*hashira geiko-hen|:\s*hashira training arc/gi, '')
-    .replace(/:\s*mugen ressha-hen|:\s*mugentrain arc/gi, '')
-    .replace(/:\s*mugen jou-hen|:\s*infinity castle/gi, '')
-    .replace(/:\s*shibuya jihen|:\s*shibuya incident/gi, '')
-    .replace(/:\s*kaigyoku\s*\/\s*gyokusetsu/gi, '')
-    .replace(/:\s*isekai ittara honki dasu.*$/gi, '')
-    .replace(/:\s*tensura nikki.*$/gi, '')
     .replace(/:\s*the final season.*$/gi, '')
     .replace(/:\s*final season.*$/gi, '')
     .replace(/:\s*part\s*\d+/gi, '')
@@ -99,147 +49,14 @@ const VALID_RELATION_TYPES = new Set(['SEQUEL', 'PREQUEL', 'PARENT_STORY', 'SIDE
  * Formata o título da temporada/filme de forma amigável em português,
  * garantindo identificação clara de arcos, filmes e partes sem textos cortados ou confusos.
  */
-function formatMediaTitlePT(title: string, format: string, index: number, rootTitle?: string): string {
-  const t = title.trim();
-  const lower = t.toLowerCase();
-  
-  // 1. Regras específicas para Kimetsu no Yaiba (Demon Slayer)
-  if (lower.includes('kimetsu no yaiba') || lower.includes('demon slayer')) {
-    if (lower.includes('mugen ressha') || lower.includes('mugen train')) {
-      return format === 'MOVIE' ? 'Filme: Trem Infinito (Mugen Train)' : 'Arco do Trem Infinito (Mugen Train)';
-    }
-    if (lower.includes('mugen jou') || lower.includes('infinity castle')) {
-      return 'Filme: Castelo Infinito (Infinity Castle)';
-    }
-    if (lower.includes('yuukaku') || lower.includes('entertainment district')) {
-      return '2ª Temporada: Distrito do Entretenimento';
-    }
-    if (lower.includes('katanakaji no sato') || lower.includes('swordsmith village')) {
-      return '3ª Temporada: Vila dos Ferreiros';
-    }
-    if (lower.includes('hashira geiko') || lower.includes('hashira training')) {
-      return '4ª Temporada: Treinamento dos Hashiras';
-    }
-    if (lower.includes('kyoudai no kizuna')) {
-      return 'Filme Especial: Laço de Irmãos';
-    }
-    if (lower.includes('asahigaoka') || lower.includes('tsuzumi')) {
-      return 'Especial: Mansão Tsuzumi';
-    }
-    if (lower.includes('natagumo')) {
-      return 'Especial: Monte Natagumo';
-    }
-    if (index === 0) {
-      return '1ª Temporada (Tanjiro Kamado: Arco de Resolução)';
-    }
-  }
+function formatMediaTitlePT(title: string, format: string, index: number, rootTitle?: string, englishTitle?: string): string {
+  // Prioriza o título em inglês da API se trouxer identificação de temporada/parte legível, ou utiliza o título oficial (romaji)
+  let raw = (englishTitle || title || '').trim();
+  if (!raw) raw = title.trim();
 
-  // 2. Regras específicas para Mushoku Tensei
-  if (lower.includes('mushoku tensei')) {
-    if (lower.includes('eris') || lower.includes('goblin')) {
-      return 'OVA Especial: Eris Caça Goblins';
-    }
-    if (lower.includes('season 2') || lower.includes(' 2nd season') || lower.includes(' ii')) {
-      if (lower.includes('part 2') || lower.includes('2nd cour')) {
-        return '2ª Temporada - Parte 2 (Labirinto de Teletransporte)';
-      }
-      return '2ª Temporada - Parte 1 (Arco Ranoa & Academia)';
-    }
-    if (lower.includes('season 3') || lower.includes(' 3rd season') || lower.includes(' iii')) {
-      return '3ª Temporada (Mushoku Tensei III)';
-    }
-    if (lower.includes('part 2') || lower.includes('2nd cour')) {
-      return '1ª Temporada - Parte 2 (Continente Demônio & Retorno)';
-    }
-    if (index === 0 || lower.includes('part 1') || lower.includes('1st cour')) {
-      return '1ª Temporada - Parte 1 (Infância & Teletransporte)';
-    }
-  }
+  let cleaned = raw;
 
-  // 3. Regras específicas para Tensei Shitara Slime Datta Ken (Slime)
-  if (lower.includes('tensei shitara slime') || lower.includes('tensura')) {
-    if (lower.includes('guren no kizuna') || lower.includes('scarlet bond')) {
-      return 'Filme: Laços Escarlates (Guren no Kizuna)';
-    }
-    if (lower.includes('tensura nikki') || lower.includes('slime diaries')) {
-      return 'Tensura Nikki: Diários de Slime (Spin-off)';
-    }
-    if (lower.includes('coleus')) {
-      return 'Especiais: Sonho de Coleus (3 episódios)';
-    }
-    if (lower.includes('season 4') || lower.includes('4th season') || lower.includes(' iv')) {
-      return '4ª Temporada (4th Season)';
-    }
-    if (lower.includes('season 3') || lower.includes('3rd season') || lower.includes(' iii')) {
-      return '3ª Temporada (Festival de Abertura de Tempest)';
-    }
-    if (lower.includes('season 2') || lower.includes('2nd season') || lower.includes(' ii')) {
-      if (lower.includes('part 2') || lower.includes('2nd cour')) {
-        return '2ª Temporada - Parte 2 (Walpurgis)';
-      }
-      return '2ª Temporada - Parte 1 (O Despertar do Lorde Demônio)';
-    }
-    if (lower.includes('ova')) {
-      return 'OVAs Especiais de Slime';
-    }
-    if (index === 0) {
-      return '1ª Temporada (Fundação da Federação Jura Tempest)';
-    }
-  }
-
-  // 4. Regras específicas para Jujutsu Kaisen
-  if (lower.includes('jujutsu kaisen')) {
-    if (lower.includes(' 0') || lower.includes(': 0')) {
-      return 'Filme: Jujutsu Kaisen 0 (Origens)';
-    }
-    if (lower.includes('kaigyoku') || lower.includes('shibuya') || lower.includes('season 2') || lower.includes('2nd season')) {
-      return '2ª Temporada: Passado de Gojo & Incidente de Shibuya';
-    }
-    if (lower.includes('shimetsu') || lower.includes('culling') || lower.includes('season 3') || lower.includes('3rd season')) {
-      return '3ª Temporada: Jogo do Abate (Culling Game)';
-    }
-    if (index === 0) {
-      return '1ª Temporada (Feto Amaldiçoado & Torneio de Kyoto)';
-    }
-  }
-
-  // 5. Regras específicas para Re:Zero
-  if (lower.includes('re:zero') || lower.includes('rezero')) {
-    if (lower.includes('memory snow')) {
-      return 'Filme OVA: Memory Snow';
-    }
-    if (lower.includes('hyouketsu') || lower.includes('frozen bond')) {
-      return 'Filme OVA: Laços Congelados (Frozen Bond)';
-    }
-    if (lower.includes('season 2') || lower.includes('2nd season')) {
-      if (lower.includes('part 2') || lower.includes('2nd cour')) {
-        return '2ª Temporada - Parte 2 (Libertação do Santuário)';
-      }
-      return '2ª Temporada - Parte 1 (Santuário de Echidna)';
-    }
-    if (lower.includes('season 3') || lower.includes('3rd season')) {
-      return '3ª Temporada (Cidade de Priestella)';
-    }
-    if (index === 0) {
-      return '1ª Temporada (Mansão Roswaal & Baleia Branca)';
-    }
-  }
-
-  // 6. Regras específicas para Solo Leveling
-  if (lower.includes('solo leveling') || lower.includes('ore dake level')) {
-    if (lower.includes('reawakening')) {
-      return 'Filme: ReAwakening';
-    }
-    if (lower.includes('arise') || lower.includes('season 2') || lower.includes('2nd season')) {
-      return '2ª Temporada: Arise from the Shadow';
-    }
-    if (index === 0) {
-      return '1ª Temporada (Despertar do Caçador Sung Jin-woo)';
-    }
-  }
-
-  // 7. Formatação inteligente genérica (remove prefixos redundantes de raiz)
-  let cleaned = t;
+  // Se o título começar pelo rootTitle, remove o prefixo duplicado apenas se restar um subtítulo legível
   if (rootTitle && cleaned.toLowerCase().startsWith(rootTitle.toLowerCase())) {
     const withoutRoot = cleaned.slice(rootTitle.length).replace(/^[:\s-]+/, '').trim();
     if (withoutRoot.length >= 3) {
@@ -247,14 +64,14 @@ function formatMediaTitlePT(title: string, format: string, index: number, rootTi
     }
   }
 
-  // Tradução de temporadas e partes para português
+  // Conversão padronizada e 100% dinâmica de identificadores de temporadas e partes da API para Português
   cleaned = cleaned
-    .replace(/(\d+)(?:nd|rd|th|st)?\s*season/gi, '$1ª Temporada')
-    .replace(/season\s*(\d+)/gi, '$1ª Temporada')
+    .replace(/(\d+)(?:nd|rd|th|st)\s*season/gi, (_, n) => `${n}ª Temporada`)
+    .replace(/season\s*(\d+)/gi, (_, n) => `${n}ª Temporada`)
     .replace(/the\s*final\s*season/gi, 'Temporada Final')
     .replace(/final\s*season/gi, 'Temporada Final')
-    .replace(/part\s*(\d+)/gi, 'Parte $1')
-    .replace(/cour\s*(\d+)/gi, 'Parte $1')
+    .replace(/cour\s*(\d+)/gi, (_, n) => `Parte ${n}`)
+    .replace(/part\s*(\d+)/gi, (_, n) => `Parte ${n}`)
     .replace(/2nd\s*cour/gi, 'Parte 2')
     .replace(/1st\s*cour/gi, 'Parte 1');
 
@@ -264,7 +81,7 @@ function formatMediaTitlePT(title: string, format: string, index: number, rootTi
     }
     return cleaned.replace(/^movie:\s*/i, 'Filme: ');
   }
-  
+
   if (format === 'OVA') {
     if (!cleaned.toLowerCase().includes('ova')) {
       return `OVA: ${cleaned}`;
@@ -881,7 +698,7 @@ export async function fetchAnimeFranchiseTree(
 
             return {
               id: item.id,
-              title: formatMediaTitlePT(item.title, item.format, idx, clusterRepTitle),
+              title: formatMediaTitlePT(item.title, item.format, idx, clusterRepTitle, item.englishTitle),
               japaneseTitle: item.japaneseTitle,
               englishTitle: item.englishTitle,
               format: mappedFormat,
